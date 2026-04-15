@@ -150,29 +150,56 @@ test.describe('Auth state (12) - /cart (POM)', () => {
   });
 
   test('A09: placeorder 200 - toast success', async ({ page }) => {
-    // po placeOrder komponent robi ponownie fetch koszyka, wiec mockujemy dwa razy (prosto: licznik)
-    let getCount = 0;
-    await page.route('**/api/users/1/cart', (route) => {
-      if (route.request().method() !== 'GET') return route.continue();
-      getCount++;
-      const body =
-        getCount === 1
-          ? {
-              cartItems: [{ productId: 101, name: 'P1', price: 10, quantity: 1, totalPrice: 10, imageUrl: '/1.jpg' }],
-              totalValue: 10,
-            }
-          : { cartItems: [], totalValue: 0 };
-      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+  // 1) Koszyk przed zamowieniem: 1 produkt
+  // 2) Koszyk po zamowieniu: pusty
+  let getCount = 0;
+
+  await page.route('**/api/users/1/cart', (route) => {
+    if (route.request().method() !== 'GET') return route.continue();
+
+    getCount++;
+    const body =
+      getCount === 1
+        ? {
+            cartItems: [
+              { productId: 101, name: 'P1', price: 10, quantity: 1, totalPrice: 10, imageUrl: '/1.jpg' },
+            ],
+            totalValue: 10,
+          }
+        : { cartItems: [], totalValue: 0 };
+
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(body),
     });
-
-    await page.route('**/api/orders/1/placeorder', (route) =>
-      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ orderId: 999 }) }),
-    );
-
-    await cart.goto();
-    await cart.placeOrder();
-    await expect(page.locator('.Toastify__toast--success')).toBeVisible({ timeout: 5000 });
   });
+
+  // Mockujemy dokladny endpoint (z wildcardem na userId)
+  await page.route('**/api/orders/*/placeorder', (route) => {
+    if (route.request().method() === 'POST') {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ orderId: 999, message: 'OK' }),
+      });
+    }
+    return route.continue();
+  });
+
+  await cart.goto();
+
+  // Upewniamy sie, ze przycisk istnieje i mozna kliknac
+  await expect(cart.checkoutButton).toBeVisible();
+  await expect(cart.checkoutButton).toBeEnabled();
+
+  await cart.placeOrder();
+
+  await expect(page.locator('.Toastify__toast--success')).toBeVisible({ timeout: 5000 });
+
+  // Po sukcesie powinien byc pusty koszyk (drugi GET)
+  await expect(cart.emptyCartMessage).toBeVisible({ timeout: 5000 });
+});
 
   test('A10: placeorder 400 - toast error (brak stanu magazynu)', async ({ page }) => {
     await page.route('**/api/users/1/cart', (route) =>
