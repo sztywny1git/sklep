@@ -190,83 +190,103 @@ test.describe('Mocking (12) - Shop page via ProductShopPagePOM', () => {
   });
 
   test('M09: addToCart 200 -> toast sukcesu', async ({ page }) => {
-    await page.route('**/api/categories', (route) =>
-      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: 1, name: 'Kat 1' }]) }),
-    );
-    await page.route('**/api/products/category/1', (route) =>
-      route.fulfill({
+  await page.route('**/api/categories', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([{ id: 1, name: 'Kat 1' }]),
+    }),
+  );
+
+  await page.route('**/api/products/category/1', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: 401,
+          name: 'Produkt Do Koszyka',
+          price: 10,
+          description: 'Opis',
+          imageUrl: '/images/p.jpg',
+          stockQuantity: 10,
+          categoryId: 1,
+          category: null,
+        },
+      ]),
+    }),
+  );
+
+  // Mockujemy dokladny endpoint z api.ts
+  await page.route('**/api/users/*/addToCart', (route) => {
+    if (route.request().method() === 'POST') {
+      return route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify([
-          {
-            id: 401,
-            name: 'Produkt Do Koszyka',
-            price: 10,
-            description: 'Opis',
-            imageUrl: '/images/p.jpg',
-            stockQuantity: 10,
-            categoryId: 1,
-            category: null,
-          },
-        ]),
-      }),
-    );
-
-    // nie wiemy dokładnie endpointu addToCart, więc łapiemy szeroko i tylko POST/PUT
-    await page.route('**/api/**', (route) => {
-      const req = route.request();
-      if (/(addToCart|cart)/i.test(req.url()) && ['POST', 'PUT'].includes(req.method())) {
-        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ message: 'OK' }) });
-      }
-      return route.continue();
-    });
-
-    await shop.goto();
-    await shop.selectCategoryByName('Kat 1');
-
-    await expect(shop.addToCartButtons).toHaveCount(1);
-    await shop.addProductToCart(0);
-
-    await expect(page.locator('.Toastify__toast--success')).toBeVisible({ timeout: 5000 }).catch(() => {});
+        body: JSON.stringify({ message: 'OK' }),
+      });
+    }
+    return route.continue();
   });
+
+  await shop.goto();
+  await shop.selectCategoryByName('Kat 1');
+
+  await expect(shop.addToCartButtons).toHaveCount(1);
+  await shop.addProductToCart(0);
+
+  // Toast ma klase sukcesu
+  await expect(page.locator('.Toastify__toast--success')).toBeVisible({ timeout: 5000 });
+});
 
   test('M10: addToCart 400 -> toast error', async ({ page }) => {
-    await page.route('**/api/categories', (route) =>
-      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: 1, name: 'Kat 1' }]) }),
-    );
-    await page.route('**/api/products/category/1', (route) =>
-      route.fulfill({
-        status: 200,
+  await page.route('**/api/categories', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([{ id: 1, name: 'Kat 1' }]),
+    }),
+  );
+
+  await page.route('**/api/products/category/1', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: 501,
+          name: 'Produkt Error',
+          price: 10,
+          description: 'Opis',
+          imageUrl: '/images/p.jpg',
+          stockQuantity: 10,
+          categoryId: 1,
+          category: null,
+        },
+      ]),
+    }),
+  );
+
+  // Mockujemy dokladny endpoint z api.ts
+  await page.route('**/api/users/*/addToCart', (route) => {
+    if (route.request().method() === 'POST') {
+      return route.fulfill({
+        status: 400,
         contentType: 'application/json',
-        body: JSON.stringify([
-          {
-            id: 501,
-            name: 'Produkt Error',
-            price: 10,
-            description: 'Opis',
-            imageUrl: '/images/p.jpg',
-            stockQuantity: 10,
-            categoryId: 1,
-            category: null,
-          },
-        ]),
-      }),
-    );
-
-    await page.route('**/api/**', (route) => {
-      const req = route.request();
-      if (/(addToCart|cart)/i.test(req.url()) && ['POST', 'PUT'].includes(req.method())) {
-        return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ message: 'Insufficient stock' }) });
-      }
-      return route.continue();
-    });
-
-    await shop.goto();
-    await shop.selectCategoryByName('Kat 1');
-
-    await shop.addProductToCart(0);
-    await expect(page.locator('.Toastify__toast--error')).toBeVisible({ timeout: 5000 }).catch(() => {});
+        body: JSON.stringify({ message: 'Insufficient stock' }),
+      });
+    }
+    return route.continue();
   });
+
+  await shop.goto();
+  await shop.selectCategoryByName('Kat 1');
+
+  await shop.addProductToCart(0);
+
+  // Toast ma klase bledu
+  await expect(page.locator('.Toastify__toast--error')).toBeVisible({ timeout: 5000 });
+});
 
   test('M11: categories opóźnione -> loader (jeśli istnieje)', async ({ page }) => {
     await page.route('**/api/categories', async (route) => {
