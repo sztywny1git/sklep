@@ -125,7 +125,7 @@ test.describe('Mocking (12) - Shop page via ProductShopPagePOM', () => {
     await expect(page.getByText(/error|błąd/i)).toBeVisible().catch(() => {});
   });
 
-  test('M07: stockQuantity=0 -> produkt widoczny, przycisk dodaj disabled/ukryty', async ({ page }) => {
+  test('M07: stockQuantity=0 -> pokazuje poprawny tekst o magazynie', async ({ page }) => {
     await page.route('**/api/categories', (route) =>
       route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: 1, name: 'Kat 1' }]) }),
     );
@@ -150,13 +150,12 @@ test.describe('Mocking (12) - Shop page via ProductShopPagePOM', () => {
 
     await shop.goto();
     await shop.selectCategoryByName('Kat 1');
+    
+    // Sprawdzamy czy nazwa produktu jest widoczna
     await expect(page.getByText('Brak Na Stanie')).toBeVisible();
-
-    // zależnie od implementacji: disabled lub brak
-    const btn = shop.addToCartButtons.first();
-    if (await btn.count()) {
-      await expect(btn).toBeDisabled().catch(() => {});
-    }
+    
+    // Sprawdzamy czy front wyrenderował zero
+    await expect(page.getByText(/W magazynie:\s*0/)).toBeVisible();
   });
 
   test('M08: długi tekst -> UI nie wywala i tekst widoczny', async ({ page }) => {
