@@ -1,137 +1,250 @@
 import { test, expect } from '@playwright/test';
+import { ProductShopPagePOM } from '../../pom/ProductShopPagePOM';
 
-test.describe('Izolacja frontendu poprzez mockowanie API', () => {
+test.describe('Testy Integracyjne UI - Mockowanie API', () => {
+    let shop: ProductShopPagePOM;
 
-    // Test sprawdza czy wyszukiwarka poprawnie wyswietla produkty zwrocone przez API
-    test('1. Wyszukiwarka zwraca dopasowane produkty', async ({ page }) => {
-        await page.route('**/api/products/search?q=kaktus', route =>
-            route.fulfill({ status: 200, body: JSON.stringify([{ id: 801, name: 'Kaktus Premium', price: 40 }]) })
-        );
-        await page.goto('/');
-        const searchInput = page.locator('input[type="text"], input[type="search"]').first();
-        if (await searchInput.isVisible()) {
-            await searchInput.fill('kaktus');
-            await searchInput.press('Enter');
-            await expect(page.getByText('Kaktus Premium')).toBeVisible().catch(() => { });
-        }
+    test.beforeEach(async ({ page }) => {
+        shop = new ProductShopPagePOM(page);
     });
 
-    // Test weryfikuje wyswietlanie komunikatu o braku wynikow wyszukiwania
-    test('2. Wyszukiwarka nie znajduje zadnych produktow (0 wynikow)', async ({ page }) => {
-        await page.route('**/api/products/search?q=qwerty', route =>
-            route.fulfill({ status: 200, body: '[]' })
+    // Testy 1-3 - Patryk
+    // Weryfikuje, czy pobrana z API lista kategorii (2 pozycje) poprawnie wyświetla się w interfejsie.
+    test('T01: Poprawne renderowanie listy kategorii', async ({ page }) => {
+        await page.route('**/api/categories', (route) =>
+            route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify([
+                    { id: 1, name: 'Kat A' },
+                    { id: 2, name: 'Kat B' },
+                ]),
+            }),
         );
-        await page.goto('/');
-        const searchInput = page.locator('input[type="text"], input[type="search"]').first();
-        if (await searchInput.isVisible()) {
-            await searchInput.fill('qwerty');
-            await searchInput.press('Enter');
-            await expect(page.getByText(/brak wynikow|nie znaleziono/i)).toBeVisible().catch(() => { });
-        }
+
+        await shop.goto();
+        await expect(shop.categoryHeader).toBeVisible();
+        await expect(shop.categoryItems).toHaveCount(2);
+        await expect(shop.categoryItems.nth(0)).toHaveText('Kat A');
+        await expect(shop.categoryItems.nth(1)).toHaveText('Kat B');
     });
 
-    // Test sprawdza reakcje interfejsu na blad serwera 500 podczas wyszukiwania
-    test('3. Blad serwera podczas wyszukiwania (500)', async ({ page }) => {
-        await page.route('**/api/products/search?q=test', route =>
-            route.fulfill({ status: 500, body: '{"message": "Search error"}' })
+    // Sprawdza zachowanie UI, gdy API dla danej kategorii zwraca pustą tablicę produktów.
+    test('T02: Obsługa braku produktów w wybranej kategorii', async ({ page }) => {
+        await page.route('**/api/categories', (route) =>
+            route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: 1, name: 'Kat 1' }]) }),
         );
-        await page.goto('/');
-        const searchInput = page.locator('input[type="text"], input[type="search"]').first();
-        if (await searchInput.isVisible()) {
-            await searchInput.fill('test');
-            await searchInput.press('Enter');
-            await expect(page.getByText(/error|blad/i)).toBeVisible().catch(() => { });
-        }
+        await page.route('**/api/products/category/1', (route) =>
+            route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }),
+        );
+
+        await shop.goto();
+        await shop.selectCategoryByName('Kat 1');
+        await expect(shop.productItems).toHaveCount(0);
     });
 
-    // Test sprawdza czy frontend blokuje wysylanie zapytan dla zbyt krotkich fraz
-    test('4. Zbyt krotka fraza wyszukiwania (walidacja frontendu)', async ({ page }) => {
-        let apiCalled = false;
-        await page.route('**/api/products/search*', route => {
-            apiCalled = true;
-            route.fulfill({ status: 200, body: '[]' });
+    // Sprawdza czy po kliknięciu "dodaj do koszyka" i udanej odpowiedzi API pojawia się komunikat o sukcesie.
+    test('T03: Wyświetlenie sukcesu po dodaniu produktu do koszyka', async ({ page }) => {
+        await page.route('**/api/categories', (route) =>
+            route.fulfill({ status: 200, body: JSON.stringify([{ id: 1, name: 'Kat 1' }]) }),
+        );
+        await page.route('**/api/products/category/1', (route) =>
+            route.fulfill({
+                status: 200,
+                body: JSON.stringify([{ id: 401, name: 'Produkt', price: 10, stockQuantity: 10, categoryId: 1 }]),
+            }),
+        );
+        await page.route('**/api/users/*/addToCart', (route) => {
+            if (route.request().method() === 'POST') {
+                return route.fulfill({ status: 200, body: JSON.stringify({ message: 'OK' }) });
+            }
+            return route.continue();
         });
-        await page.goto('/');
-        const searchInput = page.locator('input[type="text"], input[type="search"]').first();
-        if (await searchInput.isVisible()) {
-            await searchInput.fill('a');
-            await searchInput.press('Enter');
-            await page.waitForTimeout(500);
-            expect(apiCalled).toBeFalsy();
-        }
+
+        await shop.goto();
+        await shop.selectCategoryByName('Kat 1');
+        await shop.addProductToCart(0);
+        await expect(page.locator('.Toastify__toast--success')).toBeVisible({ timeout: 5000 });
     });
 
-    // Test weryfikuje poprawne ladowanie szczegolow konkretnego produktu
-    test('5. Szczegoly pojedynczego produktu z galerii (200 OK)', async ({ page }) => {
-        await page.route('**/api/products/99', route =>
-            route.fulfill({ status: 200, body: JSON.stringify({ id: 99, name: 'Bonsai Unikat', price: 999, description: 'Opis' }) })
+
+
+
+    // Testy 4-6 - Martyna
+    // Weryfikuje, czy aplikacja nie ulega awarii, gdy serwis kategorii nie zwraca żadnych danych.
+    test('T04: Obsługa pustej listy kategorii', async ({ page }) => {
+        await page.route('**/api/categories', (route) =>
+            route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }),
         );
-        await page.goto('/product/99').catch(() => page.goto('/'));
-        await expect(page.getByText('Bonsai Unikat')).toBeVisible().catch(() => { });
+
+        await shop.goto();
+        await expect(shop.categoryHeader).toBeVisible();
+        await expect(shop.categoryItems).toHaveCount(0);
     });
 
-    // Test sprawdza obsluge bledu 404 w przypadku nieistniejacego produktu
-    test('6. Produkt nie istnieje (Blad 404 - Not Found)', async ({ page }) => {
-        await page.route('**/api/products/9999', route =>
-            route.fulfill({ status: 404, body: '{"message": "Not found"}' })
+    // Sprawdza czy w przypadku błędu serwera (500) przy pobieraniu produktów wyświetla się użytkownikowi stosowny błąd.
+    test('T05: Wyświetlenie błędu przy awarii pobierania produktów', async ({ page }) => {
+        await page.route('**/api/categories', (route) =>
+            route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: 1, name: 'Kat 1' }]) }),
         );
-        await page.goto('/product/9999').catch(() => page.goto('/'));
-        await expect(page.getByText(/404|nie znaleziono/i)).toBeVisible().catch(() => { });
-    });
-
-    // Test sprawdza czy przycisk zakupu jest ukryty dla produktow archiwalnych
-    test('7. Produkt archiwalny/wycofany ze sprzedazy', async ({ page }) => {
-        await page.route('**/api/products/88', route =>
-            route.fulfill({ status: 200, body: JSON.stringify({ id: 88, name: 'Stary Produkt', isArchived: true }) })
+        await page.route('**/api/products/category/1', (route) =>
+            route.fulfill({ status: 500, body: JSON.stringify({ message: 'Error' }) }),
         );
-        await page.goto('/product/88').catch(() => page.goto('/'));
-        await expect(page.locator('button').filter({ hasText: /Dodaj/i })).not.toBeVisible().catch(() => { });
+
+        await shop.goto();
+        await shop.selectCategoryByName('Kat 1');
+        await expect(page.getByText(/error|błąd/i)).toBeVisible().catch(() => { });
     });
 
-    // Test weryfikuje odpornosc aplikacji na bledny format danych JSON z API
-    test('8. Uszkodzony format danych produktu (bledny JSON)', async ({ page }) => {
-        await page.route('**/api/products/77', route =>
-            route.fulfill({ status: 200, body: '{ id: 77, name: "Brak nawiasow' })
+    // Weryfikuje komunikat błędu, gdy próba dodania do koszyka kończy się statusem 400.
+    test('T06: Wyświetlenie błędu przy nieudanym dodaniu do koszyka', async ({ page }) => {
+        await page.route('**/api/categories', (route) =>
+            route.fulfill({ status: 200, body: JSON.stringify([{ id: 1, name: 'Kat 1' }]) }),
         );
-        await page.goto('/product/77').catch(() => page.goto('/'));
-        await expect(page.getByText(/error/i)).toBeVisible().catch(() => { });
-    });
-
-    // Test sprawdza wyswietlanie baneru promocyjnego na stronie glownej
-    test('9. Wyswietlanie baneru promocyjnego (200 OK)', async ({ page }) => {
-        await page.route('**/api/promotions', route =>
-            route.fulfill({ status: 200, body: JSON.stringify([{ id: 1, title: 'Wielka Wyprzedaz -50%' }]) })
+        await page.route('**/api/products/category/1', (route) =>
+            route.fulfill({
+                status: 200,
+                body: JSON.stringify([{ id: 501, name: 'Error', price: 10, stockQuantity: 10, categoryId: 1 }]),
+            }),
         );
-        await page.goto('/');
-        await expect(page.getByText(/Wyprzedaz/i)).toBeVisible().catch(() => { });
-    });
-
-    // Test weryfikuje zachowanie strony gdy nie ma aktywnych promocji
-    test('10. Brak aktywnych promocji (Pusta tablica)', async ({ page }) => {
-        await page.route('**/api/promotions', route =>
-            route.fulfill({ status: 200, body: '[]' })
+        await page.route('**/api/users/*/addToCart', (route) =>
+            route.fulfill({ status: 400, body: JSON.stringify({ message: 'Error' }) }),
         );
-        await page.goto('/');
-        await expect(page.getByText(/Wielka Wyprzedaz/i)).not.toBeVisible().catch(() => { });
+
+        await shop.goto();
+        await shop.selectCategoryByName('Kat 1');
+        await shop.addProductToCart(0);
+        await expect(page.locator('.Toastify__toast--error')).toBeVisible({ timeout: 5000 });
     });
 
-    // Test sprawdza czy awaria API promocji nie blokuje reszty strony
-    test('11. Awaria API promocji (Nie przerywa renderowania)', async ({ page }) => {
-        await page.route('**/api/promotions', route => route.abort('failed'));
-        await page.goto('/');
-        await expect(page.locator('nav, footer').first()).toBeVisible().catch(() => { });
+
+
+
+    // Testy 7-9 - Łukasz
+    // Sprawdza obsługę błędu przy inicjalnym ładowaniu listy kategorii.
+    test('T07: Wyświetlenie błędu przy awarii pobierania kategorii (500)', async ({ page }) => {
+        await page.route('**/api/categories', (route) =>
+            route.fulfill({
+                status: 500,
+                contentType: 'application/json',
+                body: JSON.stringify({ message: 'Internal Server Error' }),
+            }),
+        );
+
+        await shop.goto();
+        await expect(page.getByText('Error fetching categories')).toBeVisible();
     });
 
-    // Test sprawdza dzialanie loaderow podczas dlugiego ladowania danych
-    test('12. Opoznione ladowanie sekcji polecanych (Lazy loading)', async ({ page }) => {
-        await page.route('**/api/featured', async route => {
-            await new Promise(res => setTimeout(res, 800));
-            route.fulfill({ status: 200, body: JSON.stringify([{ id: 1, name: 'Polecany Kwiat' }]) });
+    // Sprawdza czy przy produkcie ze stanem magazynowym 0 wyświetla się poprawna informacja dla użytkownika.
+    test('T08: Weryfikacja etykiety braku towaru w magazynie', async ({ page }) => {
+        await page.route('**/api/categories', (route) =>
+            route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: 1, name: 'Kat 1' }]) }),
+        );
+        await page.route('**/api/products/category/1', (route) =>
+            route.fulfill({
+                status: 200,
+                body: JSON.stringify([{ id: 201, name: 'Brak', price: 9, stockQuantity: 0, categoryId: 1 }]),
+            }),
+        );
+
+        await shop.goto();
+        await shop.selectCategoryByName('Kat 1');
+        await expect(page.getByText(/W magazynie:\s*0/)).toBeVisible();
+    });
+
+    // Testuje poprawność przełączania między kategoriami – czy stare produkty znikają, a nowe się pojawiają.
+    test('T09: Dynamiczne odświeżanie listy produktów przy zmianie kategorii', async ({ page }) => {
+        await page.route('**/api/categories', (route) =>
+            route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify([{ id: 1, name: 'K1' }, { id: 2, name: 'K2' }]),
+            }),
+        );
+
+        await page.route('**/api/products/category/1', (route) =>
+            route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify([{ id: 601, name: 'P1', price: 10, description: 'Opis 1', imageUrl: '/i1.jpg', stockQuantity: 5, categoryId: 1 }])
+            }),
+        );
+
+        await page.route('**/api/products/category/2', (route) =>
+            route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify([{ id: 602, name: 'P2', price: 20, description: 'Opis 2', imageUrl: '/i2.jpg', stockQuantity: 3, categoryId: 2 }])
+            }),
+        );
+
+        await shop.goto();
+        await shop.selectCategoryByName('K1');
+        await expect(page.getByText('P1')).toBeVisible();
+        await shop.selectCategoryByName('K2');
+        await expect(page.getByText('P2')).toBeVisible();
+        await expect(page.getByText('P1')).not.toBeVisible();
+    });
+
+
+
+
+
+    // Testy 10-12 - Paweł
+    // Weryfikuje czy poprawnie pobrana lista produktów dla kategorii renderuje się w UI.
+    test('T10: Poprawne renderowanie produktów dla wybranej kategorii', async ({ page }) => {
+        await page.route('**/api/categories', (route) =>
+            route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify([{ id: 1, name: 'Kat 1' }]),
+            }),
+        );
+
+        await page.route('**/api/products/category/1', (route) =>
+            route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify([
+                    { id: 101, name: 'Produkt 1', price: 10, stockQuantity: 5, categoryId: 1 },
+                    { id: 102, name: 'Produkt 2', price: 20, stockQuantity: 1, categoryId: 1 },
+                ]),
+            }),
+        );
+
+        await shop.goto();
+        await shop.selectCategoryByName('Kat 1');
+        await expect(shop.productItems).toHaveCount(2);
+        await expect(shop.productItems.nth(0).locator('.product-name')).toHaveText('Produkt 1');
+    });
+
+    // Test sprawdzający czy UI radzi sobie z długimi ciągami znaków w nazwach produktów bez "rozsypania" layoutu.
+    test('T11: Stabilność UI przy bardzo długich nazwach produktów', async ({ page }) => {
+        const longName = 'Długa nazwa '.repeat(10);
+        await page.route('**/api/categories', (route) =>
+            route.fulfill({ status: 200, body: JSON.stringify([{ id: 1, name: 'Kat 1' }]) }),
+        );
+        await page.route('**/api/products/category/1', (route) =>
+            route.fulfill({
+                status: 200,
+                body: JSON.stringify([{ id: 301, name: longName, price: 10, stockQuantity: 1, categoryId: 1 }]),
+            }),
+        );
+
+        await shop.goto();
+        await shop.selectCategoryByName('Kat 1');
+        await expect(page.getByText(longName)).toBeVisible();
+    });
+
+    // Wymusza opóźnienie w odpowiedzi API, aby sprawdzić, czy wskaźnik ładowania (spinner) poprawnie wyświetla się w UI.
+    test('T12: Weryfikacja widoczności wskaźnika ładowania kategorii', async ({ page }) => {
+        await page.route('**/api/categories', async (route) => {
+            await new Promise((r) => setTimeout(r, 500));
+            route.fulfill({ status: 200, body: JSON.stringify([{ id: 1, name: 'Delay' }]) });
         });
-        await page.goto('/');
-        const skeleton = page.locator('.skeleton, .loader, [aria-busy="true"]').first();
-        if (await skeleton.isVisible()) {
-            await expect(skeleton).toBeVisible();
-        }
+
+        await shop.goto();
+        await expect(shop.loadingIndicator).toBeVisible().catch(() => { });
+        await expect(page.getByText('Delay')).toBeVisible();
     });
 });

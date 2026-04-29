@@ -1,136 +1,261 @@
 import { test, expect } from '@playwright/test';
+import { CartPagePOM } from '../../pom/CartPagePOM';
+import { TopNavbarPOM } from '../../pom/TopNavbarPOM';
 
-test.describe('Optymalizacja testow  poprzez zarzadzanie stanem uwierzytelnienia', () => {
+test.describe('Testy Integracyjne UI - Zarz¹dzanie stanem', () => {
+    let cart: CartPagePOM;
 
-    // Test sprawdza czy dane zalogowanego uzytkownika sa widoczne w profilu
-    test('1. Wyswietlanie danych uzytkownika po wejsciu na profil', async ({ page }) => {
-        await page.route('**/api/users/*', route =>
-            route.fulfill({ status: 200, body: JSON.stringify({ email: 'testuser@example.com', firstName: 'Jan' }) })
+    test.beforeEach(async ({ page }) => {
+        cart = new CartPagePOM(page);
+    });
+
+    // Testy 1-3 - Patryk
+    // Mockuje puste API koszyka i weryfikuje widocznoœæ nag³ówka strony.
+    test('T01: Weryfikacja widocznoœci nag³ówka koszyka', async ({ page }) => {
+        await page.route('**/api/users/1/cart', (route) =>
+            route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ cartItems: [], totalValue: 0 }) }),
         );
-        await page.goto('/profile');
-        await expect(page.getByText(/testuser@example.com/i)).toBeVisible().catch(() => { });
+
+        await cart.goto();
+        await expect(cart.cartHeader).toHaveText('Koszyk');
     });
 
-    // Test weryfikuje czy nazwa uzytkownika pojawia sie w nawigacji po zalogowaniu
-    test('2. Wyswietlanie awatara lub inicjalow w naglowku', async ({ page }) => {
-        await page.route('**/api/users/*', route =>
-            route.fulfill({ status: 200, body: JSON.stringify({ email: 'testuser@example.com' }) })
+    // Sprawdza, czy po za³adowaniu pustego koszyka pojawia siê komunikat o jego pustym stanie.
+    test('T02: Wyœwietlenie komunikatu dla pustego koszyka', async ({ page }) => {
+        await page.route('**/api/users/1/cart', (route) =>
+            route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ cartItems: [], totalValue: 0 }) }),
         );
-        await page.goto('/');
-        const profileIcon = page.locator('nav').getByText(/testuser|Profil/i).first();
-        await expect(profileIcon).toBeVisible().catch(() => { });
+
+        await cart.goto();
+        await expect(cart.emptyCartMessage).toBeVisible();
+        await expect(cart.cartItems).toHaveCount(0);
     });
 
-    // Test sprawdza przekierowanie do logowania przy braku waznej sesji
-    test('3. Odrzucenie dostepu do profilu przy uniewaznionym tokenie', async ({ page }) => {
-        await page.route('**/api/users/*', route =>
-            route.fulfill({ status: 401, body: '{"message": "Unauthorized"}' })
+    // Weryfikuje poprawne wyœwietlanie nazwy produktu na liœcie po dodaniu pojedynczego elementu.
+    test('T03: Poprawne renderowanie pojedynczego produktu w koszyku', async ({ page }) => {
+        await page.route('**/api/users/1/cart', (route) =>
+            route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    cartItems: [
+                        { productId: 101, name: 'P1', price: 10, quantity: 1, totalPrice: 10, imageUrl: '/img.jpg' },
+                    ],
+                    totalValue: 10,
+                }),
+            }),
         );
-        await page.goto('/profile');
-        await expect(page.getByText(/zaloguj|login|unauthorized/i)).toBeVisible().catch(() => { });
+
+        await cart.goto();
+        await expect(cart.cartItems).toHaveCount(1);
+        await expect(cart.cartItems.nth(0).locator('.item-name')).toHaveText('P1');
     });
 
-    // Test weryfikuje obsluge bledu 500 podczas pobierania danych profilu
-    test('4. Blad pobierania danych profilu (Blad 500 API)', async ({ page }) => {
-        await page.route('**/api/users/*', route =>
-            route.fulfill({ status: 500, body: '{"message": "Server Error"}' })
+
+
+
+
+    // Testy 4-6 - Martyna
+    // Sprawdza, czy aplikacja poprawnie renderuje liczbê produktów zgodn¹ z danymi API.
+    test('T04: Poprawna liczba elementów dla wielu produktów', async ({ page }) => {
+        await page.route('**/api/users/1/cart', (route) =>
+            route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    cartItems: [
+                        { productId: 101, name: 'P1', price: 10, quantity: 1, totalPrice: 10, imageUrl: '/1.jpg' },
+                        { productId: 102, name: 'P2', price: 20, quantity: 2, totalPrice: 40, imageUrl: '/2.jpg' },
+                    ],
+                    totalValue: 50,
+                }),
+            }),
         );
-        await page.goto('/profile');
-        await expect(page.getByText(/error|blad/i)).toBeVisible().catch(() => { });
+
+        await cart.goto();
+        await expect(cart.cartItems).toHaveCount(2);
     });
 
-    // Test sprawdza czy lista zamowien poprawnie renderuje dane z API
-    test('5. Lista poprzednich zamowien w profilu (Posiada zamowienia)', async ({ page }) => {
-        await page.route('**/api/orders/*/orders', route =>
-            route.fulfill({ status: 200, body: JSON.stringify([{ id: 1001, totalValue: 450, status: 'Wyslane' }]) })
+    // Testuje czy po zmianie iloœci produktu wyzwalane jest powiadomienie o sukcesie (Toast).
+    test('T05: Wyœwietlenie powiadomienia po zmianie iloœci produktu', async ({ page }) => {
+        await page.route('**/api/users/1/cart', (route) =>
+            route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    cartItems: [{ productId: 101, name: 'P1', price: 10, quantity: 1, totalPrice: 10, imageUrl: '/1.jpg' }],
+                    totalValue: 10,
+                }),
+            }),
         );
-        await page.goto('/profile');
-        await expect(page.getByText(/1001/i)).toBeVisible().catch(() => { });
-        await expect(page.getByText(/Wyslane/i)).toBeVisible().catch(() => { });
-    });
 
-    // Test weryfikuje komunikat dla uzytkownika bez historii zamowien
-    test('6. Komunikat o braku wczesniejszych zamowien (Pusta historia)', async ({ page }) => {
-        await page.route('**/api/orders/*/orders', route =>
-            route.fulfill({ status: 200, body: '[]' })
-        );
-        await page.goto('/profile');
-        await expect(page.getByText(/brak|pusto/i)).toBeVisible().catch(() => { });
-    });
-
-    // Test sprawdza przejscie do widoku szczegolow wybranego zamowienia
-    test('7. Podglad szczegolow konkretnego zamowienia z historii', async ({ page }) => {
-        await page.route('**/api/orders/*/orders', route =>
-            route.fulfill({ status: 200, body: JSON.stringify([{ id: 1001 }]) })
-        );
-        await page.route('**/api/orders/1001', route =>
-            route.fulfill({ status: 200, body: JSON.stringify({ id: 1001, shippingAddress: 'Warszawa 12' }) })
-        );
-        await page.goto('/profile');
-        const detailsBtn = page.locator('button, a').filter({ hasText: /Szczegoly|Details/i }).first();
-        if (await detailsBtn.isVisible()) {
-            await detailsBtn.click();
-            await expect(page.getByText(/Warszawa/i)).toBeVisible().catch(() => { });
-        }
-    });
-
-    // Test sprawdza obsluge przedluzajacego sie ladowania historii zamowien
-    test('8. Blad pobierania historii zamowien (Timeout)', async ({ page }) => {
-        await page.route('**/api/orders/*/orders', async route => {
-            await new Promise(r => setTimeout(r, 6000));
-            route.fulfill({ status: 200, body: '[]' });
-        });
-        await page.goto('/profile');
-        await expect(page.getByText(/timeout|blad/i)).toBeVisible().catch(() => { });
-    });
-
-    // Test sprawdza poprawnosc procesu wylogowania uzytkownika
-    test('9. Wylogowanie sie z aplikacji', async ({ page }) => {
-        await page.goto('/');
-        const logoutBtn = page.locator('button, a').filter({ hasText: /Wyloguj|Logout/i }).first();
-        if (await logoutBtn.isVisible()) {
-            await logoutBtn.click();
-            await expect(page.locator('a').filter({ hasText: /Zaloguj|Login/i }).first()).toBeVisible().catch(() => { });
-        }
-    });
-
-    // Test weryfikuje blokade dostepu do profilu dla niezalogowanych
-    test('10. Ochrona widoku profilu przed wylogowanym uzytkownikiem', async ({ page }) => {
-        await page.goto('/');
-        const logoutBtn = page.locator('button, a').filter({ hasText: /Wyloguj|Logout/i }).first();
-        if (await logoutBtn.isVisible()) await logoutBtn.click();
-        await page.goto('/profile');
-        await expect(page.getByText(/zaloguj sie|dostepu|login/i)).toBeVisible().catch(() => { });
-    });
-
-    // Test sprawdza wysylanie zadania zmiany hasla i obsluge sukcesu
-    test('11. Aktualizacja hasla z poziomu profilu (Mock PUT)', async ({ page }) => {
-        await page.route('**/api/users/*/password', route =>
-            route.fulfill({ status: 200, body: '{"message": "Haslo zmienione"}' })
-        );
-        await page.goto('/profile');
-        const pwdBtn = page.locator('button').filter({ hasText: /Zmien haslo/i }).first();
-        if (await pwdBtn.isVisible()) {
-            await pwdBtn.click();
-            const toast = page.locator('.Toastify__toast--success');
-            await expect(toast).toBeVisible().catch(() => { });
-        }
-    });
-
-    // Test weryfikuje proces usuniecia konta uzytkownika
-    test('12. Usuniecie konta z poziomu profilu (Mock DELETE)', async ({ page }) => {
-        await page.route('**/api/users/*', route => {
-            if (route.request().method() === 'DELETE') {
-                route.fulfill({ status: 200, body: '{"message": "Konto usuniete"}' });
-            } else {
-                route.continue();
+        await page.route('**/api/users/1/cart/101', (route) => {
+            if (route.request().method() === 'PUT') {
+                return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
             }
+            return route.continue();
         });
-        await page.goto('/profile');
-        const deleteBtn = page.locator('button').filter({ hasText: /Usun konto/i }).first();
-        if (await deleteBtn.isVisible()) {
-            await deleteBtn.click({ force: true });
-            expect(page.url()).not.toContain('profile');
-        }
+
+        await cart.goto();
+        await cart.changeQuantity(0, 2);
+
+        await expect(page.locator('.Toastify__toast--success')).toBeVisible({ timeout: 5000 });
+    });
+
+    // Weryfikuje zabezpieczenie przed ustawieniem iloœci produktu na 0 w koszyku.
+    test('T06: Walidacja minimalnej iloœci produktu w koszyku', async ({ page }) => {
+        await page.route('**/api/users/1/cart', (route) =>
+            route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    cartItems: [{ productId: 101, name: 'P1', price: 10, quantity: 1, totalPrice: 10, imageUrl: '/1.jpg' }],
+                    totalValue: 10,
+                }),
+            }),
+        );
+
+        await cart.goto();
+        await expect(cart.quantityInputs.nth(0)).toHaveValue('1');
+
+        await cart.changeQuantity(0, 0);
+        await expect(cart.quantityInputs.nth(0)).toHaveValue('1');
+    });
+
+
+
+
+
+    // Testy 7-9 - £ukasz
+    // Sprawdza, czy usuniêcie produktu z koszyka skutkuje wyœwietleniem powiadomienia.
+    test('T07: Wyœwietlenie powiadomienia po usuniêciu produktu', async ({ page }) => {
+        await page.route('**/api/users/1/cart', (route) =>
+            route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    cartItems: [{ productId: 101, name: 'P1', price: 10, quantity: 1, totalPrice: 10, imageUrl: '/1.jpg' }],
+                    totalValue: 10,
+                }),
+            }),
+        );
+
+        await page.route('**/api/users/1/cart/101', (route) => {
+            if (route.request().method() === 'DELETE') return route.fulfill({ status: 200, body: '{}' });
+            return route.continue();
+        });
+
+        await cart.goto();
+        await cart.removeItem(0);
+        await expect(page.locator('.Toastify__toast--success')).toBeVisible({ timeout: 5000 });
+    });
+
+    // Weryfikuje poprawne formatowanie wartoœci sumarycznej koszyka.
+    test('T08: Weryfikacja formatowania sumy zamówienia', async ({ page }) => {
+        await page.route('**/api/users/1/cart', (route) =>
+            route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    cartItems: [{ productId: 101, name: 'P1', price: 10, quantity: 1, totalPrice: 10, imageUrl: '/1.jpg' }],
+                    totalValue: 10,
+                }),
+            }),
+        );
+
+        await cart.goto();
+        await expect(cart.totalValue).toContainText('10.00');
+    });
+
+    // Symuluje pe³en proces sk³adania zamówienia i weryfikuje czy koszyk jest czyszczony po sukcesie.
+    test('T09: Skuteczne z³o¿enie zamówienia i wyczyszczenie koszyka', async ({ page }) => {
+        let isOrdered = false;
+
+        await page.route('**/api/users/*/cart', (route) => {
+            if (route.request().method() !== 'GET') return route.continue();
+
+            const body = !isOrdered
+                ? {
+                    cartItems: [
+                        { productId: 101, name: 'P1', price: 10, quantity: 1, totalPrice: 10, imageUrl: '/1.jpg' },
+                    ],
+                    totalValue: 10,
+                }
+                : { cartItems: [], totalValue: 0 };
+
+            return route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify(body),
+            });
+        });
+
+        await page.route('**/api/orders/*/placeorder', (route) => {
+            if (route.request().method() === 'POST') {
+                isOrdered = true;
+                return route.fulfill({
+                    status: 200,
+                    contentType: 'application/json',
+                    body: JSON.stringify({ orderId: 999, message: 'OK' }),
+                });
+            }
+            return route.continue();
+        });
+
+        await cart.goto();
+        await expect(cart.checkoutButton).toBeVisible();
+        await expect(cart.checkoutButton).toBeEnabled();
+
+        await cart.placeOrder();
+
+        await expect(page.locator('.Toastify__toast--success')).toBeVisible({ timeout: 5000 });
+        await expect(cart.emptyCartMessage).toBeVisible({ timeout: 5000 });
+    });
+
+
+
+
+    // Testy 10-12 - Pawe³
+    // Weryfikuje obs³ugê b³êdu przy próbie sk³adania zamówienia.
+    test('T10: Obs³uga b³êdu serwera podczas sk³adania zamówienia', async ({ page }) => {
+        await page.route('**/api/users/1/cart', (route) =>
+            route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    cartItems: [{ productId: 101, name: 'P1', price: 10, quantity: 1, totalPrice: 10, imageUrl: '/1.jpg' }],
+                    totalValue: 10,
+                }),
+            }),
+        );
+
+        await page.route('**/api/orders/1/placeorder', (route) =>
+            route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ message: 'Insufficient stock' }) }),
+        );
+
+        await cart.goto();
+        await cart.placeOrder();
+        await expect(page.locator('.Toastify__toast--error')).toBeVisible({ timeout: 5000 });
+    });
+
+    // Sprawdza czy stan koszyka utrzymuje siê po odœwie¿eniu strony.
+    test('T11: Zachowanie stanu koszyka po prze³adowaniu strony', async ({ page }) => {
+        await page.route('**/api/users/1/cart', (route) =>
+            route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ cartItems: [], totalValue: 0 }) }),
+        );
+
+        await cart.goto();
+        await page.reload();
+        await expect(cart.cartHeader).toHaveText('Koszyk');
+    });
+
+    // Weryfikuje proces wylogowania u¿ytkownika w pasku nawigacji.
+    test('T12: Poprawne wylogowanie u¿ytkownika z poziomu nawigacji', async ({ page }) => {
+        const nav = new TopNavbarPOM(page);
+
+        await nav.gotoHome();
+        await nav.logout();
+
+        await expect(nav.loginLink).toBeVisible();
     });
 });
