@@ -1,7 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
-    // Global settings
     fullyParallel: false,
     forbidOnly: !!process.env.CI,
     retries: process.env.CI ? 2 : 1,
@@ -10,9 +9,6 @@ export default defineConfig({
     timeout: 30_000,
 
     projects: [
-        /* =======================================
-           BACKEND API TESTS
-        ======================================= */
         {
             name: 'api',
             testDir: './tests/api',
@@ -24,10 +20,6 @@ export default defineConfig({
                 },
             },
         },
-
-        /* =======================================
-           FRONTEND E2E TESTS
-        ======================================= */
         {
             name: 'setup',
             testDir: './sklep-frontend/tests/e2e',
@@ -52,6 +44,22 @@ export default defineConfig({
         {
             name: 'mocking-tests',
             testDir: './sklep-frontend/tests/e2e/mock-tests',
+            use: {
+                ...devices['Desktop Chrome'],
+                baseURL: 'http://localhost:3000',
+                trace: 'on-first-retry',
+                screenshot: 'only-on-failure',
+                actionTimeout: 10_000,
+            },
+        },
+        {
+            name: 'frontend-tests',
+            testDir: './sklep-frontend/tests/e2e',
+            testMatch: [
+                '**/cartManagement.spec.ts',
+                '**/contactForm.spec.ts',
+                '**/productBrowsing.spec.ts'
+            ],
             use: {
                 ...devices['Desktop Chrome'],
                 baseURL: 'http://localhost:3000',

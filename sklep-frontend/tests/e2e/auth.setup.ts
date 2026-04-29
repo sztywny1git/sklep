@@ -12,7 +12,6 @@ setup('authenticate', async ({ page }) => {
 
     await page.goto('/');
 
-    // Wstrzykujemy stan zalogowanego u¿ytkownika
     await page.evaluate(() => {
         localStorage.setItem('user', JSON.stringify({
             id: 1,
