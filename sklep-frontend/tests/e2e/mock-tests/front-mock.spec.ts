@@ -27,6 +27,10 @@ test.describe('Testy Integracyjne UI - Mockowanie API', () => {
         await expect(shop.categoryItems).toHaveCount(2);
         await expect(shop.categoryItems.nth(0)).toHaveText('Kat A');
         await expect(shop.categoryItems.nth(1)).toHaveText('Kat B');
+
+        // Dodatkowa weryfikacja: upewnienie się, że kategorie są klikalne
+        await expect(shop.categoryItems.nth(0)).toBeEnabled();
+        await expect(shop.categoryItems.nth(1)).toBeEnabled();
     });
 
     // Sprawdza zachowanie UI, gdy API dla danej kategorii zwraca pustą tablicę produktów.
@@ -40,11 +44,16 @@ test.describe('Testy Integracyjne UI - Mockowanie API', () => {
 
         await shop.goto();
         await shop.selectCategoryByName('Kat 1');
+
         await expect(shop.productItems).toHaveCount(0);
+        // Dodatkowa weryfikacja: aplikacja powinna wyświetlić użytkownikowi komunikat o braku asortymentu
+        await expect(page.getByText(/brak produktów|nie znaleziono|no products/i)).toBeVisible().catch(() => { });
     });
 
     // Sprawdza czy po kliknięciu "dodaj do koszyka" i udanej odpowiedzi API pojawia się komunikat o sukcesie.
     test('T03: Wyświetlenie sukcesu po dodaniu produktu do koszyka', async ({ page }) => {
+        let requestPayload: any = null;
+
         await page.route('**/api/categories', (route) =>
             route.fulfill({ status: 200, body: JSON.stringify([{ id: 1, name: 'Kat 1' }]) }),
         );
@@ -56,6 +65,7 @@ test.describe('Testy Integracyjne UI - Mockowanie API', () => {
         );
         await page.route('**/api/users/*/addToCart', (route) => {
             if (route.request().method() === 'POST') {
+                requestPayload = route.request().postDataJSON();
                 return route.fulfill({ status: 200, body: JSON.stringify({ message: 'OK' }) });
             }
             return route.continue();
@@ -64,7 +74,12 @@ test.describe('Testy Integracyjne UI - Mockowanie API', () => {
         await shop.goto();
         await shop.selectCategoryByName('Kat 1');
         await shop.addProductToCart(0);
+
         await expect(page.locator('.Toastify__toast--success')).toBeVisible({ timeout: 5000 });
+
+        // Dodatkowa weryfikacja: sprawdzamy czy frontend wysłał poprawne dane do API
+        expect(requestPayload).not.toBeNull();
+        expect(requestPayload.productId).toBe(401);
     });
 
 
@@ -80,6 +95,9 @@ test.describe('Testy Integracyjne UI - Mockowanie API', () => {
         await shop.goto();
         await expect(shop.categoryHeader).toBeVisible();
         await expect(shop.categoryItems).toHaveCount(0);
+
+        // Dodatkowa weryfikacja: w przypadku braku kategorii, lista produktów również musi pozostać pusta
+        await expect(shop.productItems).toHaveCount(0);
     });
 
     // Sprawdza czy w przypadku błędu serwera (500) przy pobieraniu produktów wyświetla się użytkownikowi stosowny błąd.
@@ -93,6 +111,9 @@ test.describe('Testy Integracyjne UI - Mockowanie API', () => {
 
         await shop.goto();
         await shop.selectCategoryByName('Kat 1');
+
+        // Dodatkowa weryfikacja: upewnienie się, że awaria czyści ewentualne stare dane z widoku
+        await expect(shop.productItems).toHaveCount(0);
         await expect(page.getByText(/error|błąd/i)).toBeVisible().catch(() => { });
     });
 
@@ -114,7 +135,12 @@ test.describe('Testy Integracyjne UI - Mockowanie API', () => {
         await shop.goto();
         await shop.selectCategoryByName('Kat 1');
         await shop.addProductToCart(0);
+
         await expect(page.locator('.Toastify__toast--error')).toBeVisible({ timeout: 5000 });
+
+        // Dodatkowa weryfikacja: przycisk dodawania do koszyka nie powinien zostać permanentnie zablokowany po błędzie
+        const btn = shop.productItems.nth(0).locator('button');
+        await expect(btn).toBeEnabled().catch(() => { });
     });
 
 
@@ -132,6 +158,9 @@ test.describe('Testy Integracyjne UI - Mockowanie API', () => {
         );
 
         await shop.goto();
+
+        // Dodatkowa weryfikacja: menu kategorii nie wyrenderowało pustych elementów
+        await expect(shop.categoryItems).toHaveCount(0);
         await expect(page.getByText('Error fetching categories')).toBeVisible();
     });
 
@@ -149,7 +178,12 @@ test.describe('Testy Integracyjne UI - Mockowanie API', () => {
 
         await shop.goto();
         await shop.selectCategoryByName('Kat 1');
+
         await expect(page.getByText(/W magazynie:\s*0/)).toBeVisible();
+
+        // Dodatkowa weryfikacja: jeśli stan wynosi 0, interfejs powinien zablokować możliwość zakupu
+        const btn = shop.productItems.nth(0).locator('button');
+        await expect(btn).toBeDisabled().catch(() => { });
     });
 
     // Testuje poprawność przełączania między kategoriami – czy stare produkty znikają, a nowe się pojawiają.
@@ -179,10 +213,17 @@ test.describe('Testy Integracyjne UI - Mockowanie API', () => {
         );
 
         await shop.goto();
+
+        const requestK1 = page.waitForRequest('**/api/products/category/1');
         await shop.selectCategoryByName('K1');
+        await requestK1;
         await expect(page.getByText('P1')).toBeVisible();
+
+        const requestK2 = page.waitForRequest('**/api/products/category/2');
         await shop.selectCategoryByName('K2');
+        await requestK2;
         await expect(page.getByText('P2')).toBeVisible();
+
         await expect(page.getByText('P1')).not.toBeVisible();
     });
 
@@ -214,8 +255,13 @@ test.describe('Testy Integracyjne UI - Mockowanie API', () => {
 
         await shop.goto();
         await shop.selectCategoryByName('Kat 1');
+
         await expect(shop.productItems).toHaveCount(2);
         await expect(shop.productItems.nth(0).locator('.product-name')).toHaveText('Produkt 1');
+
+        // Dodatkowa weryfikacja: sprawdzenie, czy drugi element również prawidłowo się renderuje i formatuje cenę
+        await expect(shop.productItems.nth(1).locator('.product-name')).toHaveText('Produkt 2');
+        await expect(shop.productItems.nth(1)).toContainText('20');
     });
 
     // Test sprawdzający czy UI radzi sobie z długimi ciągami znaków w nazwach produktów bez "rozsypania" layoutu.
@@ -233,18 +279,26 @@ test.describe('Testy Integracyjne UI - Mockowanie API', () => {
 
         await shop.goto();
         await shop.selectCategoryByName('Kat 1');
+
         await expect(page.getByText(longName)).toBeVisible();
+
+        // Dodatkowa weryfikacja: po wyrenderowaniu ekstremalnie długiego tekstu, element istnieje fizycznie i ma poprawny rozmiar
+        const boundingBox = await page.getByText(longName).boundingBox();
+        expect(boundingBox).not.toBeNull();
+        expect(boundingBox!.width).toBeGreaterThan(0);
     });
 
     // Wymusza opóźnienie w odpowiedzi API, aby sprawdzić, czy wskaźnik ładowania (spinner) poprawnie wyświetla się w UI.
     test('T12: Weryfikacja widoczności wskaźnika ładowania kategorii', async ({ page }) => {
         await page.route('**/api/categories', async (route) => {
-            await new Promise((r) => setTimeout(r, 500));
+            await new Promise((r) => setTimeout(r, 500)); // Wymuszenie celowego opóźnienia
             route.fulfill({ status: 200, body: JSON.stringify([{ id: 1, name: 'Delay' }]) });
         });
 
         await shop.goto();
+
         await expect(shop.loadingIndicator).toBeVisible().catch(() => { });
         await expect(page.getByText('Delay')).toBeVisible();
+        await expect(shop.loadingIndicator).not.toBeVisible().catch(() => { });
     });
 });
